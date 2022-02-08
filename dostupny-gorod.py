@@ -4,11 +4,12 @@ Created on Wed Sep 15 10:39:45 2021
 
 @author: Ivan Gamma
 """
-
+import folium 
 import psycopg2
+import numpy as np
 from warnings import filterwarnings
 from pyproj import Proj, transform
-from shapely.geometry import Point, shape, Polygon
+from shapely.geometry import Point, shape, Polygon, MultiPolygon
 from OSMPythonTools.nominatim import Nominatim
 from OSMPythonTools.overpass import Overpass, overpassQueryBuilder
 def get_epsg_code(cordlist): #utm !!!
@@ -70,7 +71,7 @@ def get_houses(f, s, city_id): #f, s - начало, конец
             source=get_point(house[15]['coordinates'])
             houses.append({'id': f, 'source':source.coords[0], 'iso':list(buf.exterior.coords)})
             # print(f)
-    in4326=house[15]['coordinates']
+    in4326=[house[15]['coordinates'][0], house[15]['coordinates'][1]]
     return houses, in4326
 def get_amenity(city):
     nominatim = Nominatim()
@@ -84,8 +85,17 @@ def get_amenity(city):
     result=overpass.query(building)
     # print(result.elements())
     amenity=[]
+    amenity_in4326=[]
     for i in range(len(result.elements())):
-        # print(type(result.elements()[i].geometry()['coordinates'][0][0][0]))
+        # print(result.elements()[i].geometry()['coordinates'])
+        if type(result.elements()[i].geometry()['coordinates'][0][0])!=float and len(result.elements()[i].geometry()['coordinates'][0][0])>2:
+            amenity_c=Polygon(np.array(result.elements()[i].geometry()['coordinates'][0][0])).centroid.coords[0]
+        elif type(result.elements()[i].geometry()['coordinates'][0][0])==float:
+            amenity_c=Polygon(np.array(result.elements()[i].geometry()['coordinates'])).centroid.coords[0]
+        else:
+            amenity_c=Polygon(np.array(result.elements()[i].geometry()['coordinates'][0])).centroid.coords[0]
+        amenity_in4326.append({'id': i, 'centroid': [amenity_c[1], amenity_c[0]], 'type': result.elements()[i].tags()['amenity'], 'city': city})
+        # print(amenity_c)
         if type(result.elements()[i].geometry()['coordinates'][0][0]) == list:
         # if result.elements()[i].tags()['building'] in tags:
             cordlist=result.elements()[i].geometry()['coordinates'][0][0]
@@ -103,8 +113,9 @@ def get_amenity(city):
                 projected=get_point(cordlist)
             amenity.append(([projected.x, projected.y], result.elements()[i].tags()['amenity']))
             
-    return amenity
+    return amenity, amenity_in4326
 def get_amenity_in_buf(house, amenity, in4326):
+    print(house['iso'])
     buf_shape=Polygon(house['iso'])
     out_data=[]
     amenity_list=[]
@@ -119,9 +130,18 @@ def get_amenity_in_buf(house, amenity, in4326):
             # print('yeah')
             # return True
             amenity_elem=get_point_in_4326(amenity[i][0], in4326)
-            amenity_list.append({'id': i, 'coord': [amenity_elem.x, amenity_elem.y], 'type': amenity[i][1]})
-    out_data.append({'id': house['id'], 'coord': [house_elem.x, house_elem.y], 'containing_amenity': amenity_list})
+            amenity_list.append(i)
+    out_data.append({'id': house['id'], 'coord': [house_elem.y, house_elem.x], 'containing_amenity': amenity_list})
     return out_data
+def map_html(base, amenity_in4326):
+    for i in range(len(base)):
+        map_f=folium.Map(location=base[i]['coord'])
+        folium.Marker(location=base[i]['coord'], popup=str(base[i]['id'])).add_to(map_f)
+        for j in range(len(base[i]['containing_amenity'])):
+            for k in range(len(amenity_in4326)):
+                if base[i]['containing_amenity'][j]==amenity_in4326[k]['id']:
+                    folium.Marker(location=amenity_in4326[k]['centroid'], popup=str(f'type: {amenity_in4326[k]["type"]}')).add_to(map_f)
+        map_f.save(f"C:\Git\city15min\{base[i]['id']}.html")
 filterwarnings("ignore")
 city='Псков'
 # print("____Requesting houses (mostransport db)")
@@ -131,5 +151,7 @@ len_houses=get_num_of_houses(city_id)
 f=0
 s=10
 houses, in4326=get_houses(f, s, city_id)
-amenity=get_amenity(city)
-result=get_amenity_in_buf(houses[0], amenity, in4326)
+amenity, amenity_in4326=get_amenity(city)
+for i in range(len(houses)):
+    result=get_amenity_in_buf(houses[i], amenity, in4326)
+    map_html(result, amenity_in4326)
