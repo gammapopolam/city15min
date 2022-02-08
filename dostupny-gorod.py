@@ -57,7 +57,7 @@ def get_num_of_houses(city_id):
     conn.close()
     return len_houses
 
-def get_houses(f, s, city_id): #f, s - начало, конец
+def get_houses(f, s, city_id, city): #f, s - начало, конец
     conn=psycopg2.connect(dbname='mostransport', user='readonly', 
                       password='Alex2', host='84.201.146.240')
     cursor=conn.cursor()
@@ -69,7 +69,7 @@ def get_houses(f, s, city_id): #f, s - начало, конец
             f+=1
             buf=get_buf_of_point(house[15]['coordinates'])
             source=get_point(house[15]['coordinates'])
-            houses.append({'id': f, 'source':source.coords[0], 'iso':list(buf.exterior.coords)})
+            houses.append({'id': f, 'city_id': city_id, 'city':city, 'source':source.coords[0], 'iso':list(buf.exterior.coords)})
             # print(f)
     in4326=[house[15]['coordinates'][0], house[15]['coordinates'][1]]
     return houses, in4326
@@ -115,7 +115,7 @@ def get_amenity(city):
             
     return amenity, amenity_in4326
 def get_amenity_in_buf(house, amenity, in4326):
-    print(house['iso'])
+    # print(house['iso'])
     buf_shape=Polygon(house['iso'])
     out_data=[]
     amenity_list=[]
@@ -142,6 +142,9 @@ def map_html(base, amenity_in4326):
                 if base[i]['containing_amenity'][j]==amenity_in4326[k]['id']:
                     folium.Marker(location=amenity_in4326[k]['centroid'], popup=str(f'type: {amenity_in4326[k]["type"]}')).add_to(map_f)
         map_f.save(f"C:\Git\city15min\{base[i]['id']}.html")
+conn=psycopg2.connect(user='postgres', 
+                              password='2195', host='localhost', port='5432', database='sample')
+cursor=conn.cursor()
 filterwarnings("ignore")
 city='Псков'
 # print("____Requesting houses (mostransport db)")
@@ -150,8 +153,19 @@ city_id=city_ids[city]
 len_houses=get_num_of_houses(city_id)
 f=0
 s=10
-houses, in4326=get_houses(f, s, city_id)
+houses, in4326=get_houses(f, s, city_id, city)
 amenity, amenity_in4326=get_amenity(city)
+result=[]
 for i in range(len(houses)):
-    result=get_amenity_in_buf(houses[i], amenity, in4326)
-    map_html(result, amenity_in4326)
+    result.append(get_amenity_in_buf(houses[i], amenity, in4326)[0])
+    # map_html(result, amenity_in4326)
+for i in range(len(result)):
+        cursor.execute("INSERT INTO houses (id, city_id, source, amenity_id, city_name) VALUES (%s, %s, %s, %s, %s)", (result[i]['id'], city_id, f'POINT({str(result[i]["coord"])[1:-1]})', result[i]['containing_amenity'], city))
+        # cursor.execute(f"INSERT INTO houses (id, source) VALUES ({result[i]['id']}, POINT({str(result[i]['coord'])[1:-1]})")
+# cursor.execute(f'INSERT INTO amenity (id, city_id, city_name, type, centroid) VALUES ({amenity_in4326[0]["id"]}, {city_id}, {city}, {amenity_in4326[0]["type"]}, {str(amenity_in4326[0]["centroid"])[1:-1]})')
+# for i in range(len(amenity_in4326)):
+    # cursor.execute(f"INSERT INTO amenity (id, city_id, city_name, type, centroid) VALUES ({amenity_in4326[i]['id']}, {city_id}, '{city}', '{amenity_in4326[i]['type']}', 'POINT({str(amenity_in4326[i]['centroid'])[1:-1]})')")
+# cursor.execute('INSERT')
+conn.commit()
+cursor.close()
+conn.close()
